@@ -3,3 +3,4 @@ asyncpg==0.29.0
 APScheduler==3.10.4
 openpyxl==3.1.2
 python-dotenv==1.0.0
+aiosqlite==0.20.0
