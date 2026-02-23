@@ -773,23 +773,29 @@ async def excel_send_city_base(callback: CallbackQuery):
 async def excel_choose_shift(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         return
+
     async with get_db() as db:
-        cursor = await db.execute(
-            """SELECT id, city, date, address
-               FROM shifts
-               WHERE status != 'draft'
-               ORDER BY created_at DESC
-               LIMIT 20"""
+        shifts = await db.fetch(
+            """
+            SELECT id, city, date, address
+            FROM shifts
+            WHERE status != 'draft'
+            ORDER BY created_at DESC
+            LIMIT 20
+            """
         )
-        shifts = await cursor.fetchall()
+
     if not shifts:
         await callback.answer("Нет доступных смен", show_alert=True)
         return
+
     builder = InlineKeyboardBuilder()
     for s in shifts:
-        label = f"{s[1]} | {s[2]} | #{s[0]}"
-        builder.button(text=label, callback_data=f"excel_shift:{s[0]}")
+        # asyncpg.Record -> обращение по ключам безопаснее, чем по индексам
+        label = f"{s['city']} | {s['date']} | #{s['id']}"
+        builder.button(text=label, callback_data=f"excel_shift:{s['id']}")
     builder.adjust(1)
+
     await callback.message.answer("Выберите смену:", reply_markup=builder.as_markup())
     await callback.answer()
 

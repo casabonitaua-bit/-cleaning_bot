@@ -23,9 +23,10 @@ def _autowidth(ws):
         except AttributeError:
             pass
 
+
 async def excel_city_base(city: str) -> io.BytesIO:
     async with get_db() as db:
-        cursor = await db.execute(
+        rows = await db.fetch(
             """
             SELECT up.full_name, up.phone, u.username,
                    up.age, up.rating, up.total_shifts, up.confirmed_shifts,
@@ -33,12 +34,11 @@ async def excel_city_base(city: str) -> io.BytesIO:
                    up.consecutive_failures, up.is_active
             FROM user_profiles up
             JOIN users u ON u.telegram_id = up.telegram_id
-            WHERE up.city = ?
+            WHERE up.city = $1
             ORDER BY up.full_name
             """,
-            (city,)
+            city
         )
-        rows = await cursor.fetchall()
 
     wb = Workbook()
     ws = wb.active
@@ -59,17 +59,17 @@ async def excel_city_base(city: str) -> io.BytesIO:
 
     for r in rows:
         ws.append([
-            r[0],
-            r[1],
-            f"@{r[2]}" if r[2] else "—",
-            r[3],
-            r[4],
-            r[5],
-            r[6],
-            r[7],
-            r[8],
-            r[9],
-            "✅" if r[10] else "🚫",
+            r["full_name"],
+            r["phone"],
+            f"@{r['username']}" if r["username"] else "—",
+            r["age"],
+            r["rating"],
+            r["total_shifts"],
+            r["confirmed_shifts"],
+            r["refused_shifts"],
+            r["ignored_shifts"],
+            r["consecutive_failures"],
+            "✅" if r["is_active"] else "🚫",
         ])
 
     _autowidth(ws)
@@ -82,10 +82,12 @@ async def excel_city_base(city: str) -> io.BytesIO:
 
 async def excel_shift_report(shift_id: int) -> io.BytesIO:
     async with get_db() as db:
-        cursor = await db.execute("SELECT * FROM shifts WHERE id = ?", (shift_id,))
-        shift = await cursor.fetchone()
+        shift = await db.fetchrow(
+            "SELECT * FROM shifts WHERE id = $1",
+            shift_id
+        )
 
-        cursor = await db.execute(
+        rows = await db.fetch(
             """
             SELECT up.full_name, up.phone, up.rating,
                    sm.member_type, sm.status, sm.position,
@@ -94,18 +96,26 @@ async def excel_shift_report(shift_id: int) -> io.BytesIO:
             JOIN user_profiles up ON sm.telegram_id = up.telegram_id
             LEFT JOIN shift_results sr
                 ON sr.shift_id = sm.shift_id AND sr.telegram_id = sm.telegram_id
-            WHERE sm.shift_id = ?
+            WHERE sm.shift_id = $1
             ORDER BY sm.member_type, sm.position
             """,
-            (shift_id,)
+            shift_id
         )
-        rows = await cursor.fetchall()
 
     wb = Workbook()
     ws = wb.active
     ws.title = f"Смена {shift_id}"
 
-    # shift: id=0, city=1, date=2, address=3
+    # Если смена не найдена — не падаем, а формируем понятный файл
+    if not shift:
+        ws.append([f"Смена #{shift_id} не найдена"])
+        ws["A1"].font = Font(bold=True, size=12)
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return buf
+
+    # shift: id=0, city=1, date=2, address=3 (оставляю совместимость с твоей логикой)
     title = f"Смена #{shift_id} | {shift[1]} | {shift[2]} | {shift[3]}"
     ws.append([title])
     ws["A1"].font = Font(bold=True, size=12)
@@ -121,20 +131,20 @@ async def excel_shift_report(shift_id: int) -> io.BytesIO:
 
     for r in rows:
         worked = "—"
-        if r[6] == 1:
+        if r["worked"] == 1:
             worked = "Да"
-        elif r[6] == 0:
+        elif r["worked"] == 0:
             worked = "Нет"
 
         ws.append([
-            r[0],
-            r[1],
-            r[2],
-            "Основа" if r[3] == "main" else "Резерв",
-            r[4],
-            r[5],
+            r["full_name"],
+            r["phone"],
+            r["rating"],
+            "Основа" if r["member_type"] == "main" else "Резерв",
+            r["status"],
+            r["position"],
             worked,
-            r[7] or "",
+            r["decline_reason"] or "",
         ])
 
     _autowidth(ws)
